@@ -1,0 +1,141 @@
+JMP main
+isr: 
+    PUSH A              ; Store the registers that ISR uses
+    IN 6                ; Read pressed key symbol
+    CMP B, 0x0EEF       ; Each line on the text display has capacity of 16 characters
+    JE sort             ; If we reached last text cell in the first line
+    CMPB AL, 42         ; In ASCII asterix symbol ('*') is 42
+    JE sort             ; If pressed symbol was '*'
+    MOVB [B], AL        ; Write the symbol to text display
+    MOV A, 1            ; Set the first bit to clear the interrupts
+    OUT 2               ; Clear the interrupt (A => IRQEOI)
+    POP A               ; Restore registers to their original values
+    INC B               ; Next text cell
+    IRET                ; Return from interrupt
+    HLT
+
+sort:
+    MOV B, 0x0EF0       ; First text cell in second line on the text display
+    MOV C, 0x0EE0       ; First text cell in first line on the text display, for getting array digits
+    IN 5                ; Check KPDSTATUS
+    CMP A, 1            ; If set, a key has been pressed
+    JNE sort            ; If not, check it again
+    IN 6                ; Get the key symbol
+    CALL lower          ; Calling a function which prints lower digits on the left from pivot
+    CALL higher         ; Calling a function which prints higher digits on the right from pivot
+    CALL ascend         ; Calling a function which sorts array in ascending order
+    HLT
+    
+lower:
+lower_loop:             
+    CMP C, 0x0EEF       ; Are we over last text cell in the first line of the text display?
+    JAE end_lower       ; If yes return
+    MOVB DL, [C]        ; Getting the digit
+    CMPB DL, 0
+    JE end_lower        ; No digit => return
+    CMPB DL, AL         ; Comparing with pivot
+    JB lower_digits     ; If the digit is lower than pivot, print it
+    INC C               ; Otherwise get next digit from next text cell
+    JMP lower_loop      ; Loop
+lower_digits:
+    MOVB [B], DL        ; Printing the digit in the first text cell of second line of the text display
+    INC B               ; Preparing next text cell in second line to print next digit
+    INC C               ; Preparing next text cell in first line to get next digit
+    JMP lower_loop      ; Loop
+end_lower:
+    MOVB [B], AL        ; Print pivot to current text cell
+    RET
+    
+higher:
+    INC B               ; Not going to overwrite pivot
+    MOV C, 0x0EE0       ; Counter
+higher_loop:
+    CMP C, 0x0EEF       ; Are we over last text cell in the first line of the text display?
+    JAE end_higher      ; If yes return
+    MOVB DL, [C]        ; Getting the digit
+    CMPB DL, 0
+    JE end_higher       ; No digit => return
+    CMPB DL, AL         ; Comparing with pivot
+    JA higher_digits    ; If the digit is higher than pivot, print it
+    INC C               ; Otherwise get next digit from next text cell
+    JMP higher_loop     ; Loop
+higher_digits:
+    MOVB [B], DL        ; Printing the digit in the first text cell of second line of the text display
+    INC B               ; Preparing next text cell in second line to print next digit
+    INC C               ; Preparing next text cell in first line to get next digit
+    JMP higher_loop     ; Loop
+end_higher:
+    MOV D, B            ; Last array element text cell position, needed in ascending
+    RET
+    
+ascend:
+    MOV A, 0x0EF0       ; First text cell, second line
+    MOV B, 0x0EF1       ; Second text cell, second line
+ascend_loop:
+    CMP B, D            ; Did we compare first text cell with all others?
+    JAE end_ascend  ; If yes prepare next text cell to compare with
+    MOVB CL, [A]        ; Get first digit from array
+    MOVB DL, [B]        ; Get second digit from array
+    CMPB CL, DL         ; Is first digit below second?
+    JB next_digit       ; If yes get next digit
+    MOVB [B], CL        ; 
+    MOVB [A], DL        ; Otherwise swap them
+    INC B               ; Next text cell
+    JMP ascend_loop
+next_digit:
+    INC B               ; Next text cell
+    JMP ascend_loop     ; Loop
+    HLT
+end_ascend:
+    INC A               ; Next text cell
+    CMP A, D            ; Is it last text cell from array?
+    JAE return_ascend   ; If yes return
+    JMP ascend_loop
+return_ascend:
+    RET
+
+
+    
+main:
+    MOV SP, 0x0EDF      ; Initialize stack pointer
+    MOV B, 0x0EE0       ; First text cell
+    CALL check_digits   ; Calling a function which checks if symbol is an actual digit
+    MOV A, 1            ; Set the first bit to enable keyboard interrupts
+    OUT 0               ; Enable keyboard interrupts (A => IRQMASK)
+    STI                 ; Enable interrupts globally (M = 1)
+    HLT                 ; Halt and let interrupts do the rest   
+
+check_digits:
+    MOV D, digits       ; Getting the digits array (0-9)
+    MOVB DL, 0          ; Digit counter
+digits_loop:
+    MOVB CL, [D]        ; Digits array index
+    CMPB DL, 10         ; Are we over last index in the digits array?
+    JAE null_digits     ; If yes return and don't print anything
+    CMPB CL, AL         ; Is the input symbol a digit?
+    JE return_digits    ; If yes return and print it
+    INC D               ; Otherwise increment index and loop again
+    INCB DL
+    JMP digits_loop
+return_digits:
+    RET
+null_digits:
+    MOVB [B], 0         ; Emptying current text cell since the input was not a digit
+    DEC B               ; Decrementing B register cause the isr will increment it after return,
+                        ; so we want to stay in the same text cell rather than skipping one
+                        ; every time we typed something that is not a digit
+    RET
+    
+    
+    
+digits:
+    DB "0"
+    DB "1"
+    DB "2"
+    DB "3"
+    DB "4"
+    DB "5"
+    DB "6"
+    DB "7"
+    DB "8"
+    DB "9"
